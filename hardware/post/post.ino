@@ -27,7 +27,7 @@
 #define DHTPIN 7     // Digital pin connected to the DHT sensor
 #define DHTYPE DHT11
 // Relay Config
-#define RELAY_PIN 13
+#define RELAY_PIN 12
 // KY-037 (Noise Detector / Meter) Config
 #define KY_DPIN 5
 #define KY_APIN 0
@@ -141,6 +141,29 @@ void loop() {
         String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(postRequest.length());
         sendCommandToesp(cipSend, 4, ">");
         sendData(postRequest);
+        String closeCommand = "AT+CIPCLOSE=";
+        closeCommand+=connectionId;
+        closeCommand+="\r\n";
+        sendCommandToesp(closeCommand,5,"OK");
+      }
+      else if(command == '3'){
+        digitalWrite(RELAY_PIN, LOW);
+        delay(7500);
+        digitalWrite(RELAY_PIN, HIGH);
+
+/*         String d = "200";
+
+        String cipSend = " AT+CIPSEND=";
+             cipSend += connectionId; 
+             cipSend += ",";
+             cipSend +=d.length();
+             cipSend +="\r\n";
+             sendCommandToesp(cipSend,2, "OK");
+             sendCommandToesp(d,2, "OK"); */
+        
+        String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(res.length());
+        sendCommandToesp(cipSend, 4, ">");
+        sendData(res);
         String closeCommand = "AT+CIPCLOSE=";
         closeCommand+=connectionId;
         closeCommand+="\r\n";
