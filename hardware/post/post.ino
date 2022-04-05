@@ -24,7 +24,7 @@
 
 #include "arduino_secrets.h"
 
-#define DHTPIN 5     // Digital pin connected to the DHT sensor
+#define DHTPIN 7     // Digital pin connected to the DHT sensor
 #define DHTYPE DHT11
 // Relay Config
 #define RELAY_PIN 13
@@ -54,6 +54,7 @@ StaticJsonBuffer<200> jsonBuffer;
 JsonObject& root = jsonBuffer.createObject();
 
 void setup() {
+  digitalWrite(RELAY_PIN, HIGH);
   // Serial Config
   Serial.begin(115200);
   esp.begin(115200);  
@@ -69,7 +70,6 @@ void setup() {
   sendCommandToesp("AT+CIPSERVER=1,80\r\n", 5, "OK");
   // Other I/O Config
   pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW);
 
   dht.begin();
 }
@@ -94,9 +94,9 @@ void loop() {
       Serial.println("COMMAND: " + command); 
       Serial.println("CONNID: " + connectionId); 
       if(command == '1'){
-        digitalWrite(RELAY_PIN, HIGH);
-        delay(3000);
         digitalWrite(RELAY_PIN, LOW);
+        delay(1500);
+        digitalWrite(RELAY_PIN, HIGH);
 
 /*         String d = "200";
 
@@ -116,40 +116,35 @@ void loop() {
         closeCommand+="\r\n";
         sendCommandToesp(closeCommand,5,"OK");
       }
-      else if(command == '2'){
-        String closeCommand = "AT+CIPCLOSE=";
-        closeCommand+=connectionId;
-        closeCommand+="\r\n";
-        sendCommandToesp(closeCommand,5,"OK");  
-
-        float t = dht.readTemperature(); 
+      else if(command == '2'){ 
         float h = dht.readHumidity();  
-
+        float t = dht.readTemperature(); 
         // Delays sensor reads as desired
         // delay(loopDelay);
 
         // JSON Data - using ArduinoJson library object
         // TODO - Stubu in JSON arrays for remaining sensor values
-        root["temp"] =  (isnan(t)) ? -1 : t;
-        root["humidity"] = (isnan(h)) ? -1 : t;
+        delay(500);
+        root["humidity"] = String(h);
+        root["temp"] =  String(t);
         String data;
         root.printTo(data);
 
         // HTTP post request
-        String postRequest = "POST " + path  + " HTTP/1.1\r\n" +
-                            "Host: " + host + "\r\n" +
-                            "Accept: *" + "/" + "*\r\n" +
+        String postRequest = "" + String("HTTP/1.1 200 OK\r\n") +
+                            "Connection: close\r\n" +
                             "Content-Length: " + data.length() + "\r\n" +
                             "Content-Type: application/json\r\n" +
                             "\r\n" + data;
 
         // Send post request using AT Firmware
-        sendCommandToesp("AT+CIPMUX=1", 5, "OK");
-        sendCommandToesp("AT+CIPSTART=0,\"TCP\",\"" + host + "\"," + port, 15, "OK");
-        String cipSend = "AT+CIPSEND=0," + String(postRequest.length());
+        String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(postRequest.length());
         sendCommandToesp(cipSend, 4, ">");
         sendData(postRequest);
-        sendCommandToesp("AT+CIPCLOSE=0", 5, "OK");
+        String closeCommand = "AT+CIPCLOSE=";
+        closeCommand+=connectionId;
+        closeCommand+="\r\n";
+        sendCommandToesp(closeCommand,5,"OK");
       }
     }
 
