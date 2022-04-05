@@ -22,7 +22,17 @@
 #include <DHT.h>
 #include "SoftwareSerial.h"
 
-#include "../arduino_secrets.h"
+#include "arduino_secrets.h"
+
+#define DHTPIN 5     // Digital pin connected to the DHT sensor
+#define DHTYPE DHT11
+// Relay Config
+#define RELAY_PIN 13
+// KY-037 (Noise Detector / Meter) Config
+#define KY_DPIN 5
+#define KY_APIN 0
+// Global Config
+#define DEBUG true
 
 String wifi_ssid = SSID;                  // Wifi network SSID
 String wifi_password = PASS;          // Wifi password
@@ -37,50 +47,141 @@ int countTimeCommand;       // Used in determining success or failure of serial 
 boolean found = false;      // Used in determining success or failure of serial commands
 
 SoftwareSerial esp(3, 2);
+DHT dht(DHTPIN, DHTYPE);
 
 // Buffer to store JSON object
 StaticJsonBuffer<200> jsonBuffer;
 JsonObject& root = jsonBuffer.createObject();
 
 void setup() {
-  Serial.begin(115200);                                                                           // Start STM32 Serial at 9600 Baud
-  esp.begin(115200);                                                                          // Start ESP8266 Serial at 9600 Baud
+  // Serial Config
+  Serial.begin(115200);
+  esp.begin(115200);  
+  
+  // ESP Config
   esp.println("AT");                                                                        // Poke the ESP8266             
-  Serial.println(esp.read());                                                               // Check that AT firmware on ESP8266 is responding
+  Serial.println(esp.read());   
+  sendCommandToesp("AT+RST", 5, "OK");                                                            // Check that AT firmware on ESP8266 is responding
   sendCommandToesp("AT", 5, "OK");                                                          // If status is okay, set radio mode
-  sendCommandToesp("AT+CWMODE=1", 5, "OK");                                                 // Set radio mode
+  sendCommandToesp("AT+CWMODE=3", 5, "OK");                                                 // Set radio mode
   sendCommandToesp("AT+CWJAP=\"" + wifi_ssid + "\",\"" + wifi_password + "\"", 20, "OK");   // Connect to pre-defined wireless network
+  sendCommandToesp("AT+CIPMUX=1\r\n", 5, "OK");
+  sendCommandToesp("AT+CIPSERVER=1,80\r\n", 5, "OK");
+  // Other I/O Config
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, LOW);
+
+  dht.begin();
 }
 
 void loop() {
+  if(esp.available())
+  {
+    String res = "" +
+      String("HTTP/1.1 200 OK\r\n") +
+      "Content-Type: none\r\n" +
+      "Content-Length: 0\r\n" +
+      "Connection: close\r\n\r\n";
 
-  // Delays sensor reads as desired
-  // delay(loopDelay);
+    if(esp.find("+IPD,"))
+    {
+      Serial.println("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+      delay(1000);
+      int connectionId = esp.read()-48;
+      esp.find("command=");
+      int command = (esp.read());
+      delay(500);
+      Serial.println("COMMAND: " + command); 
+      Serial.println("CONNID: " + connectionId); 
+      if(command == '1'){
+        digitalWrite(RELAY_PIN, HIGH);
+        delay(3000);
+        digitalWrite(RELAY_PIN, LOW);
 
-  // JSON Data - using ArduinoJson library object
-  // TODO - Stubu in JSON arrays for remaining sensor values
-  root["outlet_id"] = 1;
-  root["voltage"] =  2;
-  root["vrms"] =  3;
-  root["amps_rms"] =  4;
-  String data;
-  root.printTo(data);
+/*         String d = "200";
 
-  // HTTP post request
-  String postRequest = "POST " + path  + " HTTP/1.1\r\n" +
-                       "Host: " + host + "\r\n" +
-                       "Accept: *" + "/" + "*\r\n" +
-                       "Content-Length: " + data.length() + "\r\n" +
-                       "Content-Type: application/json\r\n" +
-                       "\r\n" + data;
+        String cipSend = " AT+CIPSEND=";
+             cipSend += connectionId; 
+             cipSend += ",";
+             cipSend +=d.length();
+             cipSend +="\r\n";
+             sendCommandToesp(cipSend,2, "OK");
+             sendCommandToesp(d,2, "OK"); */
+        
+        String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(res.length());
+        sendCommandToesp(cipSend, 4, ">");
+        sendData(res);
+        String closeCommand = "AT+CIPCLOSE=";
+        closeCommand+=connectionId;
+        closeCommand+="\r\n";
+        sendCommandToesp(closeCommand,5,"OK");
+      }
+      else if(command == '2'){
+        String closeCommand = "AT+CIPCLOSE=";
+        closeCommand+=connectionId;
+        closeCommand+="\r\n";
+        sendCommandToesp(closeCommand,5,"OK");  
 
-  // Send post request using AT Firmware
-  sendCommandToesp("AT+CIPMUX=1", 5, "OK");
-  sendCommandToesp("AT+CIPSTART=0,\"TCP\",\"" + host + "\"," + port, 15, "OK");
-  String cipSend = "AT+CIPSEND=0," + String(postRequest.length());
-  sendCommandToesp(cipSend, 4, ">");
-  sendData(postRequest);
-  sendCommandToesp("AT+CIPCLOSE=0", 5, "OK");
+        float t = dht.readTemperature(); 
+        float h = dht.readHumidity();  
+
+        // Delays sensor reads as desired
+        // delay(loopDelay);
+
+        // JSON Data - using ArduinoJson library object
+        // TODO - Stubu in JSON arrays for remaining sensor values
+        root["temp"] =  (isnan(t)) ? -1 : t;
+        root["humidity"] = (isnan(h)) ? -1 : t;
+        String data;
+        root.printTo(data);
+
+        // HTTP post request
+        String postRequest = "POST " + path  + " HTTP/1.1\r\n" +
+                            "Host: " + host + "\r\n" +
+                            "Accept: *" + "/" + "*\r\n" +
+                            "Content-Length: " + data.length() + "\r\n" +
+                            "Content-Type: application/json\r\n" +
+                            "\r\n" + data;
+
+        // Send post request using AT Firmware
+        sendCommandToesp("AT+CIPMUX=1", 5, "OK");
+        sendCommandToesp("AT+CIPSTART=0,\"TCP\",\"" + host + "\"," + port, 15, "OK");
+        String cipSend = "AT+CIPSEND=0," + String(postRequest.length());
+        sendCommandToesp(cipSend, 4, ">");
+        sendData(postRequest);
+        sendCommandToesp("AT+CIPCLOSE=0", 5, "OK");
+      }
+    }
+
+    
+  }
+
+  
+}
+
+void getGetRequest() {
+
+}
+
+String retardSend(String command, const int timeout, boolean debug)
+{
+    String response = "";                                             //initialize a String variable named "response". we will use it later.
+    
+    esp.print(command);                                           //send the AT command to the esp8266 (from ARDUINO to ESP8266).
+    long int time = millis();                                         //get the operating time at this specific moment and save it inside the "time" variable.
+    while( (time+timeout) > millis())                                 //excute only whitin 1 second.
+    {      
+      while(esp.available())                                      //is there any response came from the ESP8266 and saved in the Arduino input buffer?
+      {
+        char c = esp.read();                                      //if yes, read the next character from the input buffer and save it in the "response" String variable.
+        response+=c;                                                  //append the next character to the response variabl. at the end we will get a string(array of characters) contains the response.
+      }  
+    }    
+    if(debug)                                                         //if the "debug" variable value is TRUE, print the response on the Serial monitor.
+    {
+      Serial.print(response);
+    }    
+    return response;                                                  //return the String response.
 }
 
 // Function to determine success / failure of serial commands send to/from ESP8266
