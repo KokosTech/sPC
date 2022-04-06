@@ -21,6 +21,7 @@
 #include <DHT_U.h>
 #include <DHT.h>
 #include "SoftwareSerial.h"
+#include "string.h"
 
 #include "arduino_secrets.h"
 
@@ -50,10 +51,9 @@ SoftwareSerial esp(3, 2);
 DHT dht(DHTPIN, DHTYPE);
 
 // Buffer to store JSON object
-StaticJsonBuffer<200> jsonBuffer;
-JsonObject& root = jsonBuffer.createObject();
-
+StaticJsonDocument<256> root;
 void setup() {
+  pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, HIGH);
   // Serial Config
   Serial.begin(115200);
@@ -61,15 +61,13 @@ void setup() {
   
   // ESP Config
   esp.println("AT");                                                                        // Poke the ESP8266             
-  Serial.println(esp.read());   
   sendCommandToesp("AT+RST", 5, "OK");                                                            // Check that AT firmware on ESP8266 is responding
   sendCommandToesp("AT", 5, "OK");                                                          // If status is okay, set radio mode
-  sendCommandToesp("AT+CWMODE=3", 5, "OK");                                                 // Set radio mode
+  sendCommandToesp("AT+CWMODE=1", 5, "OK");                                                 // Set radio mode
   sendCommandToesp("AT+CWJAP=\"" + wifi_ssid + "\",\"" + wifi_password + "\"", 20, "OK");   // Connect to pre-defined wireless network
-  sendCommandToesp("AT+CIPMUX=1\r\n", 5, "OK");
-  sendCommandToesp("AT+CIPSERVER=1,80\r\n", 5, "OK");
+  sendCommandToesp("AT+CIPMUX=1", 5, "OK");
+  sendCommandToesp("AT+CIPSERVER=1,80", 5, "OK");
   // Other I/O Config
-  pinMode(RELAY_PIN, OUTPUT);
 
   dht.begin();
 }
@@ -77,46 +75,27 @@ void setup() {
 void loop() {
   if(esp.available())
   {
-    String res = "" +
-      String("HTTP/1.1 200 OK\r\n") +
-      "Content-Type: none\r\n" +
-      "Content-Length: 0\r\n" +
-      "Connection: close\r\n\r\n";
-
     if(esp.find("+IPD,"))
     {
+      String res;
+      String res_type = "none";
+      String res_len = "0";
+      String res_data = "";
+      
       Serial.println("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
       delay(1000);
       int connectionId = esp.read()-48;
       esp.find("command=");
       int command = (esp.read());
       delay(500);
-      Serial.println("COMMAND: " + command); 
-      Serial.println("CONNID: " + connectionId); 
+
       if(command == '1'){
         digitalWrite(RELAY_PIN, LOW);
         delay(1500);
         digitalWrite(RELAY_PIN, HIGH);
-
-/*         String d = "200";
-
-        String cipSend = " AT+CIPSEND=";
-             cipSend += connectionId; 
-             cipSend += ",";
-             cipSend +=d.length();
-             cipSend +="\r\n";
-             sendCommandToesp(cipSend,2, "OK");
-             sendCommandToesp(d,2, "OK"); */
-        
-        String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(res.length());
-        sendCommandToesp(cipSend, 4, ">");
-        sendData(res);
-        String closeCommand = "AT+CIPCLOSE=";
-        closeCommand+=connectionId;
-        closeCommand+="\r\n";
-        sendCommandToesp(closeCommand,5,"OK");
       }
       else if(command == '2'){ 
+        delay(500);
         float h = dht.readHumidity();  
         float t = dht.readTemperature(); 
         // Delays sensor reads as desired
@@ -125,53 +104,60 @@ void loop() {
         // JSON Data - using ArduinoJson library object
         // TODO - Stubu in JSON arrays for remaining sensor values
         delay(500);
-        root["humidity"] = String(h);
-        root["temp"] =  String(t);
-        String data;
-        root.printTo(data);
+        root["humidity"] = (isnan(h)) ? "NaN" : String(h);
+        root["temp"] =  isnan(t) ? "NaN" : String(t);
+        Serial.println("---------------------------");
+        serializeJson(root, res_data);
+        serializeJson(root, Serial);
+        Serial.println("---------------------------");
 
         // HTTP post request
-        String postRequest = "" + String("HTTP/1.1 200 OK\r\n") +
-                            "Connection: close\r\n" +
-                            "Content-Length: " + data.length() + "\r\n" +
-                            "Content-Type: application/json\r\n" +
-                            "\r\n" + data;
-
-        // Send post request using AT Firmware
-        String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(postRequest.length());
-        sendCommandToesp(cipSend, 4, ">");
-        sendData(postRequest);
-        String closeCommand = "AT+CIPCLOSE=";
-        closeCommand+=connectionId;
-        closeCommand+="\r\n";
-        sendCommandToesp(closeCommand,5,"OK");
+        res_len = res_data.length();
+        res_type = "application/json";
       }
       else if(command == '3'){
         digitalWrite(RELAY_PIN, LOW);
         delay(7500);
         digitalWrite(RELAY_PIN, HIGH);
 
-/*         String d = "200";
 
-        String cipSend = " AT+CIPSEND=";
-             cipSend += connectionId; 
-             cipSend += ",";
-             cipSend +=d.length();
-             cipSend +="\r\n";
-             sendCommandToesp(cipSend,2, "OK");
-             sendCommandToesp(d,2, "OK"); */
-        
+      }
+      if(command == '1' || command == '2' || command == '3'){
+        res = "" +
+        String("HTTP/1.1 200 OK\r\n") +
+        "Content-Type: " + res_type + "\r\n" +
+        "Content-Length: " + res_len + "\r\n" 
+        "Connection: close\r\n\r\n"
+        + res_data;
         String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(res.length());
-        sendCommandToesp(cipSend, 4, ">");
+        if(sendCommandToesp(cipSend, 5, ">") == false){
+          res = "" + String("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+          String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(res.length());
+        }
         sendData(res);
         String closeCommand = "AT+CIPCLOSE=";
         closeCommand+=connectionId;
         closeCommand+="\r\n";
-        sendCommandToesp(closeCommand,5,"OK");
+        sendCommandToesp(closeCommand,1,"OK");
+      } else {
+          res = "" +
+          String("HTTP/1.1 404 Not Found\r\n") +
+          "Content-Type: " + res_type + "\r\n" +
+          "Content-Length: " + res_len + "\r\n" 
+          "Connection: close\r\n\r\n";          
+          String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(res.length());
+          sendCommandToesp("AT+CIPSTO=7200", 2, "OK");
+          if(sendCommandToesp(cipSend, 5, ">") == false){
+            res = "" + String("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+            String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(res.length());
+          }
+          sendData(res);
+          String closeCommand = "AT+CIPCLOSE=";
+          closeCommand+=connectionId;
+          closeCommand+="\r\n";
+          sendCommandToesp(closeCommand,1,"OK");
       }
     }
-
-    
   }
 
   
@@ -203,7 +189,7 @@ String retardSend(String command, const int timeout, boolean debug)
 }
 
 // Function to determine success / failure of serial commands send to/from ESP8266
-void sendCommandToesp(String command, int maxTime, char readReplay[]) {
+boolean sendCommandToesp(String command, int maxTime, char readReplay[]) {
   Serial.print(countTrueCommand);
   Serial.print(". at command => ");
   Serial.print(command);
@@ -211,10 +197,24 @@ void sendCommandToesp(String command, int maxTime, char readReplay[]) {
   while (countTimeCommand < (maxTime * 1))
   {
     esp.println(command);
-    if (esp.find(readReplay))
-    {
-      found = true;
-      break;
+    if(!strcmp(readReplay, ">")){
+      if (esp.find(readReplay))
+      {
+        found = true;
+        break;
+      } else {
+        delay(1000);  //added
+        Serial.println("AT+CIPCLOSE=0");
+        esp.println("AT+CIPCLOSE=0");
+        //Resend...
+        return false;
+      }
+    } else {
+      if (esp.find(readReplay))
+      {
+        found = true;
+        break;
+      } 
     }
 
     countTimeCommand++;
@@ -225,6 +225,8 @@ void sendCommandToesp(String command, int maxTime, char readReplay[]) {
     Serial.println("Success");
     countTrueCommand++;
     countTimeCommand = 0;
+    found = false;
+    return true;
   }
 
   if (found == false)
@@ -232,9 +234,8 @@ void sendCommandToesp(String command, int maxTime, char readReplay[]) {
     Serial.println("Fail");
     countTrueCommand = 0;
     countTimeCommand = 0;
+    return false;
   }
-
-  found = false;
 }
 
 // Send post request to Arduino and ESP8266
