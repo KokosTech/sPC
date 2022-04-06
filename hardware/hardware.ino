@@ -1,413 +1,244 @@
-// Date and time functions using a DS1307 RTC connected via I2C and Wire lib
-#include <SoftwareSerial.h>
+//
+// ESP8266 HTTP Post Program
+//
+// Uses an ESP8266 ESP-01, connected to an STM32 Blue Pill
+//
+// Must have 128k flash variant of the STM32!
+//
+//  Pins
+//  STM32 pin PA2 Serial 2 (RX) to ESP8266 TX
+//  Arduino pin PA3 Serial 2 to voltage divider then to ESP8266 RX
+//  Connect GND from the STM32 to GND on the ESP8266
+//  Connect 3.3V from the STM32 to VCC on the ESP8266
+//  Pull ESP8266 CH_PD HIGH via jumper from ESP8266 3.3V line
+//
+// Original code credit / inspiration:
+// https://community.wia.io/d/25-how-to-setup-an-arduino-uno-with-esp8266-and-publish-an-event-to-wia
+// Alan - WIA community admin
+//
+
+#include <ArduinoJson.h> // Must use library version <= 5.13.4, 6.x.x is incompatible. Handles JSON formatting
 #include <DHT_U.h>
 #include <DHT.h>
+#include "SoftwareSerial.h"
 
 #include "arduino_secrets.h"
 
-#define DHTPIN 5     // Digital pin connected to the DHT sensor
+#define DHTPIN 7     // Digital pin connected to the DHT sensor
+#define DHTYPE DHT11
+// Relay Config
+#define RELAY_PIN 12
+// KY-037 (Noise Detector / Meter) Config
+#define KY_DPIN 5
+#define KY_APIN 0
+// Global Config
 #define DEBUG true
 
-SoftwareSerial esp8266(3, 2);
+String wifi_ssid = SSID;                  // Wifi network SSID
+String wifi_password = PASS;          // Wifi password
+String host = "192.168.0.238";                           // Server hostname or IP
+String path = "/post-test";                     // API Route
+String port = "8080";                                       // HTTP Port
 
-DHT dht(DHTPIN, DHT11);
+int outletId = 1;           // Unique, hard-coded ID for each outlet.
+int loopDelay = 5000;       // 5 second delay between sensor reads
+int countTrueCommand;       // Used in determining success or failure of serial commands
+int countTimeCommand;       // Used in determining success or failure of serial commands
+boolean found = false;      // Used in determining success or failure of serial commands
 
-const int relay = 13;
-//const int LedIndicator = 9;
+SoftwareSerial esp(3, 2);
+DHT dht(DHTPIN, DHTYPE);
 
-// char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+// Buffer to store JSON object
+StaticJsonDocument<200> root;
 
-void setup()
-{
-    // coffeeDays[0][4] = 1;
-    // coffeeHours[0] = 18;
-    // coffeeMinutes[0] = 43;
-    // coffeeCounter++;
-    Serial.begin(115200);
-    esp8266.begin(115200);
+void setup() {
+  digitalWrite(RELAY_PIN, HIGH);
+  // Serial Config
+  Serial.begin(115200);
+  esp.begin(115200);  
+  
+  // ESP Config  
+  sendCommandToesp("AT+RST", 5, "OK");
+  delay(1000);
+  sendCommandToesp("AT", 5, "OK");                                                          // If status is okay, set radio mode
+  sendCommandToesp("AT+CWMODE=3", 5, "OK");                                                 // Set radio mode
+  sendCommandToesp("AT+CWJAP=\"" + wifi_ssid + "\",\"" + wifi_password + "\"", 20, "OK");   // Connect to pre-defined wireless network
+  sendCommandToesp("AT+CIPMUX=1\r\n", 5, "OK");
+  sendCommandToesp("AT+CIPSERVER=1,80\r\n", 5, "OK");
+  // Other I/O Config
+  pinMode(RELAY_PIN, OUTPUT);
 
-    pinMode(relay, OUTPUT);
-    digitalWrite(relay, LOW);
-    setupESP();
-    dht.begin();
+  dht.begin();
 }
 
-void loop()
-{
+void loop() {
+  if(esp.available())
+  {
+    String res = "" +
+      String("HTTP/1.1 200 OK\r\n") +
+      "Content-Type: none\r\n" +
+      "Content-Length: 0\r\n" +
+      "Connection: close\r\n\r\n";
 
-    // Serial.print(now.year(), DEC);
-    // Serial.print('/');
-    // Serial.print(now.month(), DEC);
-    // Serial.print('/');
-    // Serial.print(now.day(), DEC);
-    // Serial.print(" (");
-    // Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
-    // Serial.print(") ");
-    // Serial.print(now.hour(), DEC);
-    // Serial.print(':');
-    // Serial.print(now.minute(), DEC);
-    // Serial.print(':');
-    // Serial.print(now.second(), DEC);
-    // Serial.println();
-
-    float t = dht.readTemperature(); 
-    float h = dht.readHumidity();  
-
-/*     if (isnan(h) || isnan(t)) {
-        Serial.println(F("Failed to read from DHT sensor!"));
-        delay(5000);
-        return;
-    }
-    else {
-        float hic = dht.computeHeatIndex(t, h, false);
-            Serial.print(F(" Humidity: "));
-            Serial.print(h);
-            Serial.print(F("%  Temperature: "));
-            Serial.print(t);
-            Serial.print(F("°C "));
-            Serial.print(hic);
-            Serial.print(F("°C "));
-    } */
-
-
-    if (esp8266.available())
+    if(esp.find("+IPD,"))
     {
-        esp8266.find("command=");
-        char command = (esp8266.read());
-        Serial.print("\ncommand: ");
-        Serial.println(command);
-        Serial.println("\n");
-        // digitalWrite(LedIndicator, HIGH);
-        String content = "";
-        if (command == '1')
-        {
-            command = (esp8266.read());            
-            Serial.println("\ncommand: ");
-            Serial.println(command);
-            Serial.println("\n");
-            digitalWrite(relay, HIGH);
-            delay(2000);
-            digitalWrite(relay, LOW);
-            content = "heating";
-            
-        }
-        else if (command == '2')
-        {
-            Serial.println("\n\nCOMMAND 2\n\n");
-            int connectionId = esp8266.read()-48;
-            Serial.print("\n\nCONNID -> ");
-            Serial.println(connectionId);
+      Serial.println("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+      delay(1000);
+      int connectionId = esp.read()-48;
+      esp.find("command=");
+      int command = (esp.read());
+      delay(500);
+      Serial.println("COMMAND: " + command); 
+      Serial.println("CONNID: " + connectionId); 
+      if(command == '1'){
+        digitalWrite(RELAY_PIN, LOW);
+        delay(1500);
+        digitalWrite(RELAY_PIN, HIGH);
 
-            sendHTTPResponse(connectionId);
+/*         String d = "200";
 
-            String closeCommand = "AT+CIPCLOSE="; 
-            closeCommand+=connectionId; // append connection id
-            closeCommand+="\r\n";
-
-            sendDataBTW(closeCommand,3000,DEBUG);
-            
-/*             String webpage = "<h1>Hello</h1>&lth2>World!</h2><button>LED1</button>";
-            String cipSend = "AT+CIPSEND=";
-            cipSend += connectionId;
-            cipSend += ",";
-            cipSend +=webpage.length();
-            cipSend +="\r\n";
-            
-            sendDataBTW(cipSend,1000,DEBUG);
-            sendDataBTW(webpage,1000,DEBUG);
-            sendDataBTW(closeCommand,3000,DEBUG);
-
-            
-            webpage="<button>LED2</button>";
-            
-            cipSend = "AT+CIPSEND=";
-            cipSend += connectionId;
-            cipSend += ",";
-            cipSend +=webpage.length();
-            cipSend +="\r\n";
-            
-            sendDataBTW(cipSend,1000,DEBUG);
-            sendDataBTW(webpage,1000,DEBUG);
-            sendDataBTW(closeCommand,3000,DEBUG); */
-
+        String cipSend = " AT+CIPSEND=";
+             cipSend += connectionId; 
+             cipSend += ",";
+             cipSend +=d.length();
+             cipSend +="\r\n";
+             sendCommandToesp(cipSend,2, "OK");
+             sendCommandToesp(d,2, "OK"); */
         
+        String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(res.length());
+        sendCommandToesp(cipSend, 4, ">");
+        sendData(res);
+        String closeCommand = "AT+CIPCLOSE=";
+        closeCommand+=connectionId;
+        closeCommand+="\r\n";
+        sendCommandToesp(closeCommand,5,"OK");
+      }
+      else if(command == '2'){ 
+        float h = dht.readHumidity();  
+        float t = dht.readTemperature(); 
+        // Delays sensor reads as desired
+        // delay(loopDelay);
 
-            //server.send(200, "text/html", SendHTML(69,69,"THIS IS A FUCKING TIME", "AND THIS A DATE"));
+        // JSON Data - using ArduinoJson library object
+        // TODO - Stubu in JSON arrays for remaining sensor values
+        delay(500);
+        root["humidity"] = String(h);
+        root["temp"] =  String(t);
+        String data;
+        serializeJson(root, data);
 
-/*             int command_int = (esp8266.read()) - 48;
-            for (int i = 0; i < command_int; i++)
-            {
-                command_int = (esp8266.read()) - 48;
-                coffeeDays[coffeeCounter][command_int] = true;
-            }
+        // HTTP post request
+        String postRequest = "" + String("HTTP/1.1 200 OK\r\n") +
+                            "Connection: close\r\n" +
+                            "Content-Length: " + data.length() + "\r\n" +
+                            "Content-Type: application/json\r\n" +
+                            "\r\n" + data;
 
-            command_int = (esp8266.read()) - 48;
-            if (command_int == 0)
-            {
-                command_int = (esp8266.read()) - 48;
-                coffeeHours[coffeeCounter] = command_int;
-            }
-            else
-            {
-                command_int *= 10;
-                command_int += (esp8266.read()) - 48;
-                coffeeHours[coffeeCounter] = command_int;
-            }
+        // Send post request using AT Firmware
+        String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(postRequest.length());
+        sendCommandToesp(cipSend, 4, ">");
+        sendData(postRequest);
+        String closeCommand = "AT+CIPCLOSE=";
+        closeCommand+=connectionId;
+        closeCommand+="\r\n";
+        sendCommandToesp(closeCommand,5,"OK");
+      }
+      else if(command == '3'){
+        digitalWrite(RELAY_PIN, LOW);
+        delay(7500);
+        digitalWrite(RELAY_PIN, HIGH);
 
-            command_int = (esp8266.read()) - 48;
-            if (command_int == 0)
-            {
-                command_int = (esp8266.read()) - 48;
-                coffeeMinutes[coffeeCounter] = command_int;
-            }
-            else
-            {
-                command_int *= 10;
-                command_int += (esp8266.read()) - 48;
-                coffeeMinutes[coffeeCounter] = command_int;
-            } */
-        }
-        //Serial.println("send HTTP Request");
-        //sendHTTPResponse(connectionId);
-        // close connection
-        //sendCommand("AT+CIPCLOSE=0\r\n", 1000, DEBUG);
+/*         String d = "200";
 
-        //digitalWrite(LedIndicator, LOW);
-        //  delay(25000);
+        String cipSend = " AT+CIPSEND=";
+             cipSend += connectionId; 
+             cipSend += ",";
+             cipSend +=d.length();
+             cipSend +="\r\n";
+             sendCommandToesp(cipSend,2, "OK");
+             sendCommandToesp(d,2, "OK"); */
+        
+        String cipSend = "AT+CIPSEND=" + String(connectionId) + "," + String(res.length());
+        sendCommandToesp(cipSend, 4, ">");
+        sendData(res);
+        String closeCommand = "AT+CIPCLOSE=";
+        closeCommand+=connectionId;
+        closeCommand+="\r\n";
+        sendCommandToesp(closeCommand,5,"OK");
+      }
     }
 
-    //    for (int i = 0; i < coffeeCounter; i++)
-    //    {
-    //        if (coffeeDays[now.dayOfTheWeek()] && (now.hour() == coffeeHours[i] && now.minute() == coffeeMinutes[i]))
-    //        {
-    //            digitalWrite(LedIndicator, HIGH);
-    //            delay(1000);
-    //            digitalWrite(LedIndicator, LOW);
-    //            Serial.println("It worked?");
-    //            delay(20000);
-    //
-    //            break;
-    //        }
-    //    }
+    
+  }
 
-    // calculate a date which is 7 days and 30 seconds into the future
-    //  DateTime future (now + TimeSpan(7, 12, 30, 6));
-    //
-    //  Serial.print(" now + 7d + 30s: ");
-    //  Serial.print(future.year(), DEC);
-    //  Serial.print('/');
-    //  Serial.print(future.month(), DEC);
-    //  Serial.print('/');
-    //  Serial.print(future.day(), DEC);
-    //  Serial.print(' ');
-    //  Serial.print(future.hour(), DEC);
-    //  Serial.print(':');
-    //  Serial.print(future.minute(), DEC);
-    //  Serial.print(':');
-    //  Serial.print(future.second(), DEC);
-    //  Serial.println();
-    //
-    //  Serial.println();
-    // delay(30000);
+  
 }
 
-String sendDataBTW(String command, const int timeout, boolean debug)
+void getGetRequest() {
+
+}
+
+String retardSend(String command, const int timeout, boolean debug)
 {
-    String response = "";
+    String response = "";                                             //initialize a String variable named "response". we will use it later.
     
-    esp8266.print(command); // send the read character to the esp8266
-    
-    long int time = millis();
-    
-    while( (time+timeout) > millis())
-    {
-      while(esp8266.available())
+    esp.print(command);                                           //send the AT command to the esp8266 (from ARDUINO to ESP8266).
+    long int time = millis();                                         //get the operating time at this specific moment and save it inside the "time" variable.
+    while( (time+timeout) > millis())                                 //excute only whitin 1 second.
+    {      
+      while(esp.available())                                      //is there any response came from the ESP8266 and saved in the Arduino input buffer?
       {
-        
-        // The esp has data so display its output to the serial window 
-        char c = esp8266.read(); // read the next character.
-        response+=c;
+        char c = esp.read();                                      //if yes, read the next character from the input buffer and save it in the "response" String variable.
+        response+=c;                                                  //append the next character to the response variabl. at the end we will get a string(array of characters) contains the response.
       }  
-    }
-    
-    if(debug)
+    }    
+    if(debug)                                                         //if the "debug" variable value is TRUE, print the response on the Serial monitor.
     {
       Serial.print(response);
-    }
-    
-    return response;
+    }    
+    return response;                                                  //return the String response.
 }
 
-String SendHTML(float TemperatureWeb,float HumidityWeb, String TimeWeb,String DateWeb){
-  String ptr = "<!DOCTYPE html> <html>\n";
-  ptr +="<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
-  ptr +="<title>ESP8266 Global Server</title>\n";
-
-  ptr +="</head>\n";
-  ptr +="<body>\n";
-  ptr +="<div id=\"webpage\">\n";
-  ptr +="<h1>ESP8266 Global Server</h1>\n";
-
-  ptr +="<p>Date: ";
-  ptr +=(String)DateWeb;
-  ptr +="</p>";
-  ptr +="<p>Time: ";
-  ptr +=(String)TimeWeb;
-  ptr +="</p>";
-  ptr +="<p>Temperature: ";
-  ptr +=(int)TemperatureWeb;
-  ptr +="C</p>";
-  ptr +="<p>Humidity: ";
-  ptr +=(int)HumidityWeb;
-  ptr +="%</p>";
-  
-  ptr +="</div>\n";
-  ptr +="</body>\n";
-  ptr +="</html>\n";
-  return ptr;
-}
-
-void setupESP()
-{
-    sendCommand("AT+RST\r\n", 2000, DEBUG);
-    sendCommand("AT+CWJAP=\"" + SSID +"\",\"" + PASS + "\"\r\n", 3000, DEBUG);
-    sendCommand("AT+CWMODE=1\r\n", 1500, DEBUG);                                             //set the ESP8266 WiFi mode to station mode.
-    sendCommand("AT+CIFSR\r\n", 1000, DEBUG);
-    sendCommand("AT+CWMODE=3\r\n", 1000, DEBUG);
-    sendCommand("AT+CIPMUX=1\r\n", 1000, DEBUG);       // configure for multiple connections
-    sendCommand("AT+CIPSERVER=1,80\r\n", 1000, DEBUG); // set server
-    Serial.println("Server Ready");
-}
-
-/*
-   Name: sendData
-   Description: Function used to send data to ESP8266.
-   Params: command - the data/command to send; timeout - the time to wait for a response; debug - print to Serial window?(true = yes, false = no)
-   Returns: The response from the esp8266 (if there is a reponse)
-*/
-String sendData(String command, const int timeout, boolean debug)
-{
-    String response = "";
-    Serial.println("Sending: " + command);
-    esp8266.println(command);
-    if (debug)
+// Function to determine success / failure of serial commands send to/from ESP8266
+void sendCommandToesp(String command, int maxTime, char readReplay[]) {
+  Serial.print(countTrueCommand);
+  Serial.print(". at command => ");
+  Serial.print(command);
+  Serial.print(" ");
+  while (countTimeCommand < (maxTime * 1))
+  {
+    esp.println(command);
+    if (esp.find(readReplay))
     {
-        Serial.print("Command: ");
-        Serial.println(command);
+      found = true;
+      break;
     }
-    unsigned long start = millis();
-    while (millis() - start < timeout)
-    {
-        if (esp8266.available())
-        {
-            char c = esp8266.read();
-            response += c;
-        }
-    }
-    if (debug)
-    {
-        Serial.println(response);
-    }
-    return response;
 
-    // String response = "";
-    // int dataSize = command.length();
-    // char data[dataSize];
-    // command.toCharArray(data, dataSize);
-    // esp8266.write(data, dataSize); // send the read character to the esp8266
-    // if (debug)
-    // {
-    //     Serial.println("\r\n====== HTTP Response From Arduino ======");
-    //     Serial.write(data, dataSize);
-    //     Serial.println("\r\n========================================");
-    // }
-    // long int time = millis();
-    // while ((time + timeout) > millis())
-    // {
-    //     while (esp8266.available())
-    //     {
-    //         // The esp has data so display its output to the serial window
-    //         char c = esp8266.read(); // read the next character.
-    //         response += c;
-    //     }
-    // }
-    // if (debug)
-    // {
-    //     Serial.print(response);
-    // }
-    // return response;
+    countTimeCommand++;
+  }
+
+  if (found == true)
+  {
+    Serial.println("Success");
+    countTrueCommand++;
+    countTimeCommand = 0;
+  }
+
+  if (found == false)
+  {
+    Serial.println("Fail");
+    countTrueCommand = 0;
+    countTimeCommand = 0;
+  }
+
+  found = false;
 }
 
-/*
-   Name: sendHTTPResponse
-   Description: Function that sends HTTP 200, HTML UTF-8 response
-*/
-
-void sendHTTPResponse(char connectionId)
-{
-    // build HTTP response
-    String httpHeader;
-    // HTTP Body
-
-    // HTTP Header
-    httpHeader = "HTTP/1.1 200 OK\r\n";
-    httpHeader += "Content-Type: text/html; charset=UTF-8\r\n";
-    httpHeader += "Connection: close\r\n";
-    httpHeader += "Content-Length: ";
-    httpHeader += 0;
-    httpHeader += "\r\n\r\n";
-    // HTTP Response
-    // send the response
-    Serial.println("send CIP Data");
-    sendCIPData(connectionId, httpHeader);
-}
-
-/*
-   Name: sendCIPDATA
-   Description: sends a CIPSEND=<connectionId>,<data> command
-
-*/
-void sendCIPData(char connectionId, String data)
-{
-    String cipSend = "AT+CIPSEND=";
-    cipSend += connectionId;
-    cipSend += ",";
-    cipSend += data.length();
-    cipSend += "\r\n";
-    Serial.println("CIPSEND Command");
-    sendCommand(cipSend, 3000, DEBUG);
-    sendData(data, 3000, DEBUG);
-}
-
-/*
-   Name: sendCommand
-   Description: Function used to send data to ESP8266.
-   Params: command - the data/command to send; timeout - the time to wait for a response; debug - print to Serial window?(true = yes, false = no)
-   Returns: The response from the esp8266 (if there is a reponse)
-*/
-String sendCommand(String command, const int timeout, boolean debug)
-{
-    String response = "";
-    char c;
-    esp8266.print(command); // send the read character to the esp8266
-    long int time = millis();
-    while ((time + timeout) > millis())
-    {
-        while (esp8266.available())
-        {
-            // The esp has data so display its output to the serial window
-            c = esp8266.read(); // read the next character.
-            response += c;
-        }
-        if (c == '>')
-        {
-            Serial.println("> found");
-            break;
-        }
-    }
-    if (debug)
-    {
-        Serial.println("Response: " + response);
-    }
-    return response;
+// Send post request to Arduino and ESP8266
+void sendData(String postRequest) {
+  Serial.println(postRequest);
+  esp.println(postRequest);
+  delay(1500);
+  countTrueCommand++;
 }
