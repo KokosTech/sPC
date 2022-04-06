@@ -67,6 +67,7 @@ void loop() {
 		String def_res = "" + String("HTTP/1.1 200 OK\r\n") +
 						"Content-Type: none\r\n" +
 						"Content-Length: 0\r\n" +
+						"Access-Control-Allow-Origin: *\r\n" +
 						"Connection: close\r\n\r\n";
 
 		if(esp.find("+IPD,")) {

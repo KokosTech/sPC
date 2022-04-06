@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import axios from 'axios';
 
 import logo from './logo.svg';
 import './App.css';
@@ -6,16 +7,32 @@ import './App.css';
 function App() {
   const [data, setData] = useState("");
 
-useEffect(() => {
-  // GET request using fetch inside useEffect React hook
-  fetch('http://192.168.0.129:80/?command=1')
-      .then(response => setData(response))
-      .then(console.log(data));
+  const url = "http://localhost:8080";
+  axios.defaults.headers.get['Access-Control-Allow-Origin'] = '*';
 
-// empty dependency array means this effect will only run once (like componentDidMount in classes)
-}, [data]);
+  const power = (command) => {
+    axios.get(url + "/power?command=" + command)
+    .then(response => {
+      if(response.ok)
+        alert("Turning on the light");
+    }, error => {
+      console.log(error);
+    });
+  };
 
-
+  const fetchData = () => {
+    axios.get(url + "/get_data", {
+      headers: {
+        Accept: "application/json",
+      },
+      crossdomain: true,
+    })
+    .then(response => {
+      console.log(response.data);
+    }, error => {
+      console.log(error);
+    });
+  };
 
   return (
     <div className="App">
@@ -24,6 +41,10 @@ useEffect(() => {
         <p>
           Edit <code>src/App.js</code> and save to reload.
         </p>
+        <button className="btn bg-white"onClick={() => fetchData()}>Get data</button>
+        <button onClick={() => power('1')}>Power on/off</button>
+        <button onClick={() => power('3')}>Reset</button>
+
         <a
           className="App-link"
           href="https://reactjs.org"
