@@ -44,7 +44,7 @@ void sendCommandToesp(String command, int maxTime, char readReplay[]);
 
 // Send HTTP Response from the Arduino and the ESP8266 to the client (aka the React / Flutter app)
 // Func could also be used to SEND GET / POST requests
-void sendData(String postRequest)
+void sendData(String postRequest);
 
 void setup() {
 	// Setting the relay to its default state (just in case) - relay connected with NO (Normally Open)
