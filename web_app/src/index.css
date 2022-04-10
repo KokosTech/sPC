@@ -9,3 +9,8 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+@layer components {
+  .button {
+    @apply bg-white dark:bg-slate-800 border border-neutral-800 dark:border-slate-700 p-3 m-3 rounded-lg duration-200 ease-in-out transform hover:-translate-y-1 hover:scale-110;
+  }
+}
