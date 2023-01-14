@@ -46,11 +46,11 @@ function App() {
   };
 
   return (
-    <div className="App h-full bg-neutral-100 dark:bg-slate-900 text-black dark:text-white">
-        <button className="button" onClick={() => fetchData()}>Get data</button>
-        <button className="button" onClick={() => power('1')}>Power on/off</button>
-        <button className="button" onClick={() => power('3')}>Reset</button>
-        <Notification message={message} type={type} showModal={showModal} setShowModal={setShowModal}/>
+    <div className="App h-full flex flex-col bg-neutral-100 dark:bg-black text-black dark:text-white">
+        <button className="button dark:text-white" onClick={() => fetchData()}>Get data</button>
+        <button className="button dark:text-white" onClick={() => power('1')}>Power on/off</button>
+        <button className="button dark:text-white" onClick={() => power('3')}>Reset</button>
+        <p className="block text-white">Temp: 24°C | Humidity: 41%</p>
     </div>
   );
 }

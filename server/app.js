@@ -1,4 +1,3 @@
-// index.js
 const express = require("express");
 const app = express();
 var cors = require("cors");
@@ -10,10 +9,10 @@ axios.defaults.headers.get['Access-Control-Allow-Origin'] = '*';
 const url = "http://192.168.0.129/?command="
 
 app.get("/power", (req, res) => {
-/*   let command = req.query.command;
+  let command = req.query.command;
   console.log(command);
   axios.get(url + command)
-  .then(() => {
+  .then((response) => {
     if(response.ok && response.status === 200)
       res.status(200);
     else
@@ -21,11 +20,27 @@ app.get("/power", (req, res) => {
   }, error => {
     console.log(error);
     res.send('Server error', 500);
-  }); */
+  });
   res.status(200);
+
+  axios.get(url, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      Accept: "application/json",
+    },
+    crossdomain: true,
+  })
+  .then((response) => {
+      res.send(response.data);
+      res.send('OK', 200);
+    }, (error) => {
+      console.log(error);
+      res.send('Server error', 500);
+    }
+  );
 });
 
-app.get("/get_data", (res) => {
+app.get("/get_data", (req, res) => {
     axios.get(url + "2", {
       headers: {
         Accept: "application/json",
@@ -33,10 +48,11 @@ app.get("/get_data", (res) => {
       crossdomain: true,
     })
     .then((response) => {
-      if(response.ok && response.status === 200)
+      if(response.ok && response.status === 200){
         res.send(response.data);
-      else
-      res.send('Server error', 500);
+        res.send('OK', 200);
+      } else
+        res.send('Server error', 500);
     }, error => {
       console.log(error);
       res.send('Server error', 500);

@@ -11,6 +11,6 @@ body {
 
 @layer components {
   .button {
-    @apply bg-white dark:bg-slate-800 border border-neutral-800 dark:border-slate-700 p-3 m-3 rounded-lg duration-200 ease-in-out transform hover:-translate-y-1 hover:scale-110;
+    @apply bg-white dark:bg-slate-900 border border-neutral-800 dark:border-slate-800 p-3 m-3 rounded-lg duration-200 ease-in-out transform hover:-translate-y-1 hover:scale-110;
   }
 }
